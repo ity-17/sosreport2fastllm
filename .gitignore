@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Test data (large binaries)
+test_scenarios/
+
+# Real production data
+sosreport-GM-BPL1133999-20260513183947/
+
+# Sample data
+sample_data/
+
+# Generated reports
+report.md
+
+# Workspace / temp
+workspace/
+ws_*/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
