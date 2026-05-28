@@ -1,19 +1,14 @@
-"""SOSReport RCA Engine V0.1 — 主入口."""
+"""SOSReport RCA Engine V0.2 — 主入口."""
 import argparse
 import os
 import sys
 import time
 from pathlib import Path
 
-# ============================================================
-# API 配置 — 在这里填写你的 DeepSeek API Key 和 URL
-# ============================================================
-DEEPSEEK_API_KEY = "sk-0dfee4a774094c2a9ec86b8961043bff"   # 填写你的 DeepSeek API Key，如 "sk-xxx"
-DEEPSEEK_API_URL = "https://api.deepseek.com"   # 填写 API 地址（留空用官方默认 https://api.deepseek.com）
-
 # Ensure src/ is on path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.config import DEEPSEEK_API_KEY, DEEPSEEK_API_URL, LLM_MODEL, DEFAULT_MARGIN
 from src.extractor import extract_and_index
 from src.timeline import build_timeline
 from src.rules import run_rule_engine
@@ -30,8 +25,8 @@ def main():
     parser.add_argument("--fault-time", help='故障时间点，如 "15:32" 或 "2024-01-15 15:32:00"')
     parser.add_argument("--output", default="report.md", help="输出报告路径 (default: report.md)")
     parser.add_argument("--workspace", default="./workspace", help="工作目录 (default: ./workspace)")
-    parser.add_argument("--margin", type=int, default=15, help="时间窗口前后分钟数 (default: 15)")
-    parser.add_argument("--model", default="deepseek-chat", help="LLM 模型 (default: deepseek-chat)")
+    parser.add_argument("--margin", type=int, default=DEFAULT_MARGIN, help=f"时间窗口前后分钟数 (default: {DEFAULT_MARGIN})")
+    parser.add_argument("--model", default=LLM_MODEL, help=f"LLM 模型 (default: {LLM_MODEL})")
     parser.add_argument("--no-llm", action="store_true", help="不使用 LLM，仅输出规则引擎证据")
     parser.add_argument("--api-key", help="DeepSeek API key（也可设环境变量 DEEPSEEK_API_KEY）")
     parser.add_argument("--api-url", help="API 地址（默认 https://api.deepseek.com，也可设环境变量 DEEPSEEK_BASE_URL）")

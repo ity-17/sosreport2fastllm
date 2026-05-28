@@ -1,0 +1,15 @@
+{
+  "scenario": "io_hang_oom",
+  "fault_time": "19:20",
+  "fault_description": "存储 I/O Hang 导致 D 状态进程阻塞，最终触发 OOM Killer",
+
+  "must_have_events": ["BLOCKED_TASK", "IO_ERROR", "STORAGE_ERROR", "OOM_KILL", "FILESYSTEM_ERROR", "FS_REMOUNT_RO"],
+  "may_have_events": ["RCU_STALL", "SOFT_LOCKUP", "SYN_FLOOD", "CONNTRACK_FULL", "PROCESS_KILLED"],
+  "forbidden_events": ["KERNEL_PANIC"],
+
+  "must_have_keywords": ["storage", "I/O", "iowait", "blocked"],
+  "forbidden_keywords": ["memory leak", "CPU bug"],
+
+  "root_cause_should_contain": "存储",
+  "root_cause_should_not_contain": "内存泄漏"
+}

@@ -1,0 +1,15 @@
+{
+  "scenario": "memory_exhaustion",
+  "fault_time": "19:20",
+  "fault_description": "内存耗尽触发 OOM Killer，大量进程被杀",
+
+  "must_have_events": ["OOM_KILL", "PROCESS_KILLED", "BLOCKED_TASK"],
+  "may_have_events": ["IO_ERROR", "FILESYSTEM_ERROR", "FS_REMOUNT_RO", "SOFT_LOCKUP"],
+  "forbidden_events": [],
+
+  "must_have_keywords": ["memory", "kill"],
+  "forbidden_keywords": [],
+
+  "root_cause_should_contain": "内存",
+  "root_cause_should_not_contain": ""
+}

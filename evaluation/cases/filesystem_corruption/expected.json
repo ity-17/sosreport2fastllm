@@ -1,0 +1,15 @@
+{
+  "scenario": "filesystem_corruption",
+  "fault_time": "19:20",
+  "fault_description": "磁盘 I/O 错误导致文件系统损坏，EXT4 日志异常，文件系统被重新挂载为只读",
+
+  "must_have_events": ["IO_ERROR", "STORAGE_ERROR", "FILESYSTEM_ERROR", "FS_REMOUNT_RO", "BLOCKED_TASK"],
+  "may_have_events": ["SOFT_LOCKUP", "OOM_KILL"],
+  "forbidden_events": [],
+
+  "must_have_keywords": ["filesystem", "I/O", "error", "read-only"],
+  "forbidden_keywords": [],
+
+  "root_cause_should_contain": "文件系统",
+  "root_cause_should_not_contain": ""
+}

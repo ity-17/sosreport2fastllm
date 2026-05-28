@@ -1,0 +1,128 @@
+{
+  "timestamp": "2026-05-25T21:11:17.572978",
+  "total_cases": 4,
+  "average_score": 0.56,
+  "pass_count": 1,
+  "fail_count": 3,
+  "results": [
+    {
+      "case": "cpu_softlockup",
+      "score": 0.43,
+      "event_recall": 1.0,
+      "keyword_recall": 0.33,
+      "forbidden_event_violations": [
+        "OOM_KILL",
+        "IO_ERROR",
+        "FILESYSTEM_ERROR"
+      ],
+      "forbidden_keyword_violations": [],
+      "root_cause": "底层存储设备 sda 发生 I/O 错误（Unhandled error code），导致文件系统 ext4 日志损坏并强制重挂载为只读，进而引发内核线程（jbd2、kworker）长时间阻塞和 CPU 软死锁，最终触发 OOM 杀死 MySQL 进程。",
+      "summary": "19:23:25 起，sda 设备出现 I/O 错误和存储错误，导致 jbd2 日志线程阻塞超过 120 秒，文件系统检测到日志异常后于 19:23:31 重挂载为只读。随后 RCU 检测到 CPU 软死锁（kworker 卡住 23 秒），系统内存压力增大，最终在 19:23:37 触发 OOM Killer 杀死 MySQL 进程。同时，MySQL 端口 3306 出现 SYN 洪泛和连接跟踪表满，表明外部请求激增可能加剧了系统负载。",
+      "detected_events": [
+        "BLOCKED_TASK",
+        "CONNTRACK_FULL",
+        "FILESYSTEM_ERROR",
+        "FS_REMOUNT_RO",
+        "IO_ERROR",
+        "OOM_KILL",
+        "PROCESS_KILLED",
+        "RCU_STALL",
+        "SOFT_LOCKUP",
+        "STORAGE_ERROR",
+        "SYN_FLOOD"
+      ],
+      "missing_events": [],
+      "extra_checks": {
+        "root_cause_should_not_contain": "'内存' found in RCA"
+      },
+      "event_count_before_agg": 11
+    },
+    {
+      "case": "filesystem_corruption",
+      "score": 0.45,
+      "event_recall": 1.0,
+      "keyword_recall": 0.25,
+      "forbidden_event_violations": [
+        "OOM_KILL"
+      ],
+      "forbidden_keyword_violations": [
+        "OOM"
+      ],
+      "root_cause": "底层存储设备（sda）发生硬件 I/O 错误，导致 EXT4 文件系统日志损坏，文件系统被重新挂载为只读，进而引发系统级连锁故障（任务阻塞、RCU 停滞、软死锁、OOM 杀进程）。",
+      "summary": "19:23:25 起，系统检测到 jbd2 任务阻塞超过 120 秒，随后出现存储设备 I/O 错误和未处理错误码，导致 EXT4 日志被中止。文件系统于 19:23:31 被重新挂载为只读。此后，I/O 停滞引发 RCU 停滞和 CPU 软死锁，内存压力导致 OOM Killer 终止了 mysqld 进程。同时，由于 mysqld 被终止，MySQL 服务不可用，触发 SYN 洪泛和连接跟踪表满。",
+      "detected_events": [
+        "BLOCKED_TASK",
+        "CONNTRACK_FULL",
+        "FILESYSTEM_ERROR",
+        "FS_REMOUNT_RO",
+        "IO_ERROR",
+        "OOM_KILL",
+        "PROCESS_KILLED",
+        "RCU_STALL",
+        "SOFT_LOCKUP",
+        "STORAGE_ERROR",
+        "SYN_FLOOD"
+      ],
+      "missing_events": [],
+      "extra_checks": {},
+      "event_count_before_agg": 11
+    },
+    {
+      "case": "io_hang_oom",
+      "score": 0.9,
+      "event_recall": 1.0,
+      "keyword_recall": 0.75,
+      "forbidden_event_violations": [],
+      "forbidden_keyword_violations": [],
+      "root_cause": "底层存储设备（sda）发生 I/O 错误，导致文件系统（sda1）日志损坏并强制重新挂载为只读，进而引发 D 状态进程阻塞、RCU 和软锁存器超时，最终因内存耗尽触发 OOM Killer 杀死 mysqld 进程。",
+      "summary": "在 19:23:25 至 19:23:40 期间，存储设备 sda 出现 I/O 错误（IO_ERROR 和 STORAGE_ERROR），导致文件系统 ext4 日志中止（FILESYSTEM_ERROR），系统将文件系统重新挂载为只读（FS_REMOUNT_RO）。这造成 jbd2 等进程在 D 状态阻塞超过 120 秒（BLOCKED_TASK），进而引发 RCU 检测到 CPU 停滞（RCU_STALL）和 CPU#2 软锁存器（SOFT_LOCKUP）。由于进程阻塞和内存压力累积，系统在 19:23:37 触发 OOM Killer 杀死 mysqld 进程（OOM_KILL 和 P",
+      "detected_events": [
+        "BLOCKED_TASK",
+        "CONNTRACK_FULL",
+        "FILESYSTEM_ERROR",
+        "FS_REMOUNT_RO",
+        "IO_ERROR",
+        "OOM_KILL",
+        "PROCESS_KILLED",
+        "RCU_STALL",
+        "SOFT_LOCKUP",
+        "STORAGE_ERROR",
+        "SYN_FLOOD"
+      ],
+      "missing_events": [],
+      "extra_checks": {},
+      "event_count_before_agg": 11
+    },
+    {
+      "case": "memory_exhaustion",
+      "score": 0.47,
+      "event_recall": 1.0,
+      "keyword_recall": 0.67,
+      "forbidden_event_violations": [
+        "IO_ERROR",
+        "FILESYSTEM_ERROR",
+        "FS_REMOUNT_RO",
+        "SOFT_LOCKUP"
+      ],
+      "forbidden_keyword_violations": [],
+      "root_cause": "底层存储设备（sda）发生 I/O 错误，导致文件系统（sda1）日志损坏并强制只读重挂载，进而引发内核线程阻塞、RCU 和软锁死锁，最终内存耗尽触发 OOM Killer 杀死 mysqld 进程。",
+      "summary": "19:23:25 起，系统检测到 sda1 设备 I/O 错误和存储错误，随后文件系统日志中止并强制重挂载为只读。这导致 jbd2 等内核任务阻塞超过 120 秒，进而引发 RCU 检测到 CPU 停滞和 CPU#2 软锁死锁。在 I/O 和锁死锁期间，内存压力累积（可能因 mysqld 等进程无法正常写入而持续分配），最终在 19:23:37 触发 OOM Killer 杀死 mysqld 进程。同时，端口 3306 出现 SYN 洪泛和连接跟踪表满，表明外部连接请求加剧了内存消耗。",
+      "detected_events": [
+        "BLOCKED_TASK",
+        "CONNTRACK_FULL",
+        "FILESYSTEM_ERROR",
+        "FS_REMOUNT_RO",
+        "IO_ERROR",
+        "OOM_KILL",
+        "PROCESS_KILLED",
+        "RCU_STALL",
+        "SOFT_LOCKUP",
+        "STORAGE_ERROR",
+        "SYN_FLOOD"
+      ],
+      "missing_events": [],
+      "extra_checks": {},
+      "event_count_before_agg": 11
+    }
+  ]
+}

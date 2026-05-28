@@ -5,7 +5,7 @@ title SOSReport RCA Engine
 cd /d "%~dp0"
 
 echo ========================================
-echo   SOSReport RCA Engine V0.1
+echo   SOSReport RCA Engine V0.2
 echo ========================================
 echo.
 echo 正在启动分析服务，浏览器将自动打开...

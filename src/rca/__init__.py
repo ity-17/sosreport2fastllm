@@ -7,78 +7,143 @@ import os
 import re
 from datetime import datetime
 from src.models import StructuredEvidence, RCAOutput
+from src.config import DEEPSEEK_API_KEY, DEEPSEEK_API_URL, LLM_MODEL
 
 RCA_SYSTEM_PROMPT = """你是一名资深 Linux SRE 专家，擅长从系统异常事件中推理故障根因。
 
-你收到的输入是经过规则引擎提取的结构化异常事件列表，不是原始日志。
-你需要基于这些证据进行因果推理。
+## 输入说明
 
-要求:
-1. 推断最可能的根因
-2. 用 2-3 句话总结故障过程
-3. 按时间顺序列出关键时间线事件
-4. 列出关键证据，每条证据关联到具体事件
-5. 推断故障影响范围（影响了哪些服务、节点、用户）
-6. 列出至少 1 个被排除的竞争性假设，并说明为何排除
-7. 给出 3-5 条修复建议，按优先级排序
+你收到的输入是规则引擎提取的结构化异常事件列表。事件格式为：
+  [严重度] 事件类型 | 证据详情 | (出现次数, 时间范围)
 
-禁止:
-- 编造不存在的证据
-- 忽略数据质量标记（MEDIUM/LOW 时必须在报告中降低置信度表述）
-- 使用模糊表述如"可能是系统问题"
+事件中的 count 字段表示该事件在时间窗口内出现了多少次。高频事件（count > 100）通常是根因的直接信号。
 
-输出格式为严格的 JSON，不要包含 markdown 代码块标记。"""
+## 推理要求
+
+### 1. 根因推断
+- 区分「根因」和「表象」：OOM Kill 通常是表象，根因可能是内存泄漏、存储 I/O Hang、或配置不当
+- 根因必须有具体证据支撑，禁止凭空推测
+- 每个根因声明必须引用至少 1 条事件证据，格式：「[证据] 事件类型 → 推断」
+
+### 2. 竞争性假设（必填）
+- 列出至少 1 个被考虑的竞争性假设
+- 说明为何排除该假设（必须引用具体缺失的证据或矛盾的事件）
+- 格式：
+  {
+    "hypothesis": "CPU 软死锁",
+    "why_rejected": "未检测到 SOFT_LOCKUP 事件，且 SAR 显示 CPU idle 正常"
+  }
+
+### 3. 证据不足声明
+- 如果某个推理步骤缺乏直接证据，必须声明「证据不足」
+- 不允许用模糊表述掩盖信息缺失
+
+### 4. 修复建议
+- 按优先级排序（P0 → P1 → P2）
+- 每条建议必须是可执行的具体操作，如「检查 SAN 交换机端口错误计数」
+- 禁止泛化建议如「排查存储问题」
+
+## 输出格式
+
+严格 JSON，不要包含 markdown 代码块标记。字段说明：
+- root_cause: 1-2 句话精确描述根因
+- summary: 2-3 句话完整故障过程
+- timeline: [{time, event}]
+- evidence: [{event_type, inference}]  每个必须是「事件 → 我的推断」
+- impact: 影响了哪些服务/节点/用户
+- alternative_hypotheses: [{hypothesis, why_rejected}]
+- recommendations: [{priority, action}]  P0/P1/P2
+
+## 禁止事项
+
+- 编造不存在的事件作为证据
+- 使用模糊表述如「可能是系统问题」「硬件故障」
+- 忽视数据质量标记（MEDIUM/LOW 时必须降低置信度表述）
+- 把表象当根因（OOM Kill 本身不是根因）
+"""
 
 
 def _build_prompt(evidence: StructuredEvidence) -> str:
-    """从 StructuredEvidence 构建 LLM prompt。"""
-    # 按 severity 分组统计
+    """从 StructuredEvidence 构建 LLM prompt。支持聚合事件的展示。"""
+    severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+
+    # 按严重度 + 出现次数降序排列
+    def sort_key(e):
+        count = e.evidence.get("count", 1) if isinstance(e.evidence, dict) else 1
+        return (severity_order.get(e.severity, 3), -count)
+
+    sorted_events = sorted(evidence.events, key=sort_key)
+
+    # 构建事件列表
+    events_str_parts = []
+    for e in sorted_events:
+        sev = e.severity
+        et = e.event_type
+        ev = e.evidence
+
+        if isinstance(ev, dict) and "count" in ev and ev["count"] > 1:
+            first = datetime.fromtimestamp(ev["first_seen"]).strftime("%H:%M:%S") if ev.get("first_seen") else "?"
+            last = datetime.fromtimestamp(ev["last_seen"]).strftime("%H:%M:%S") if ev.get("last_seen") else "?"
+            samples = ""
+            if ev.get("sample_lines"):
+                samples = "\n    样本: " + ev["sample_lines"][0][:120]
+            events_str_parts.append(
+                f"[{sev}] {et} | 出现 {ev['count']} 次, {first} ~ {last}{samples}"
+            )
+        elif isinstance(ev, dict) and "raw_line" in ev:
+            events_str_parts.append(f"[{sev}] {et} | {ev['raw_line'][:200]}")
+        else:
+            events_str_parts.append(f"[{sev}] {et} | {json.dumps(ev, ensure_ascii=False)[:200]}")
+
+    events_str = "\n".join(events_str_parts)
+
+    # 构建时间线（聚合事件用 first_seen）
+    timeline_events = []
+    for e in evidence.events:
+        ts = None
+        if isinstance(e.evidence, dict) and "first_seen" in e.evidence:
+            ts = e.evidence["first_seen"]
+        elif e.timestamp:
+            ts = e.timestamp
+        if ts:
+            timeline_events.append((ts, e))
+
+    timeline_events.sort(key=lambda x: x[0])
+    timeline_str = "\n".join(
+        f"- {datetime.fromtimestamp(ts).strftime('%H:%M:%S')} [{e.severity}] {e.event_type}"
+        for ts, e in timeline_events[:30]
+    )
+
+    # 严重度统计
     severity_count = {}
     for e in evidence.events:
         severity_count[e.severity] = severity_count.get(e.severity, 0) + 1
 
-    # 列出事件（去重显示 event_type，保留首次出现的 evidence）
-    seen_types = set()
-    unique_events = []
-    for e in evidence.events:
-        if e.event_type not in seen_types:
-            seen_types.add(e.event_type)
-            unique_events.append(e)
-
-    events_str = "\n".join(
-        f"- [{e.severity}] {e.event_type}"
-        + (f" | {json.dumps(e.evidence, ensure_ascii=False)}" if e.evidence else "")
-        for e in unique_events
-    )
-
-    # 构建完整时间线（按时间排序的事件）
-    timeline_events = [e for e in evidence.events if e.timestamp]
-    timeline_events.sort(key=lambda e: e.timestamp or 0)
-    timeline_str = "\n".join(
-        f"- {datetime.fromtimestamp(e.timestamp).strftime('%H:%M:%S') if e.timestamp else '?'} "
-        f"[{e.severity}] {e.event_type}"
-        for e in timeline_events[:30]  # 限制数量
-    )
+    # 数据质量警告
+    quality_warning = ""
+    if evidence.data_quality == "MEDIUM":
+        quality_warning = "\n\n⚠️ 数据质量为 MEDIUM，部分日志源缺失。结论可信度受限，必须在报告中标注不确定性。"
+    elif evidence.data_quality == "LOW":
+        quality_warning = "\n\n⚠️ 数据质量为 LOW，关键日志严重缺失。结论仅供参考，建议补充数据后重新分析。"
 
     return f"""## 故障描述
 {evidence.fault_description}
 
-## 故障时间
-{evidence.fault_time}
+## 故障时间窗口
+{evidence.fault_time}（±15 分钟）
 
 ## 数据质量
-{evidence.data_quality}
-（HIGH=数据充分 / MEDIUM=数据基本可用 / LOW=数据缺失，结论需谨慎）
+{evidence.data_quality}{quality_warning}
 
-## 检测到的异常事件（去重，共 {len(evidence.events)} 个事件）
+## 检测到的异常事件（按严重度和频率排序，共 {len(evidence.events)} 个类型）
 
-### 按严重度统计
+### 严重度统计
 CRITICAL: {severity_count.get('CRITICAL', 0)}
 HIGH: {severity_count.get('HIGH', 0)}
 MEDIUM: {severity_count.get('MEDIUM', 0)}
 LOW: {severity_count.get('LOW', 0)}
 
-### 唯一事件类型
+### 事件详情
 {events_str}
 
 ### 事件时间线
@@ -139,25 +204,39 @@ def run_rca(evidence: StructuredEvidence, llm_config: dict | None = None) -> RCA
     try:
         from openai import OpenAI
 
-        api_key = llm_config.get("api_key") or os.environ.get("DEEPSEEK_API_KEY") or "sk-placeholder"
-        api_url = llm_config.get("api_url") or os.environ.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
+        api_key = llm_config.get("api_key") or DEEPSEEK_API_KEY
+        api_url = llm_config.get("api_url") or DEEPSEEK_API_URL
         client = OpenAI(api_key=api_key, base_url=api_url)
 
-        response = client.chat.completions.create(
-            model=llm_config.get("model", "deepseek-chat"),
-            max_tokens=2048,
-            temperature=0.1,
-            messages=[
+        model = llm_config.get("model", LLM_MODEL)
+        kwargs = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": RCA_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
-        )
+        }
+        # deepseek-reasoner: 内部思考消耗 token，需要更大的输出额度，且不支持 temperature
+        if "reasoner" in model:
+            kwargs["max_tokens"] = 8192
+        else:
+            kwargs["max_tokens"] = 4096
+            kwargs["temperature"] = 0.1
+
+        response = client.chat.completions.create(**kwargs)
 
         text = response.choices[0].message.content if response.choices else ""
         result = _extract_json(text or "")
 
+        # 如果 JSON 解析失败，保留原始文本用于排查
+        if result.get("root_cause") == "无法解析 LLM 输出":
+            print(f"[RCA] JSON 解析失败，LLM 原始响应（前 500 字符）: {text[:500]}", flush=True)
+
     except Exception as exc:
         # LLM 不可用时降级为基于规则的推断
+        import traceback
+        print(f"[RCA] LLM 调用异常: {exc}", flush=True)
+        traceback.print_exc()
         result = _fallback_rca(evidence, str(exc))
 
     # 归一化 LLM 输出（兼容 dict/list 混合格式）
@@ -170,9 +249,21 @@ def run_rca(evidence: StructuredEvidence, llm_config: dict | None = None) -> RCA
                 # timeline: {"time": "16:14", "event": "xxx"}
                 if "time" in item:
                     out.append(f"{item.get('time', '?')} - {item.get('event', item.get('description', ''))}")
-                # recommendations: {"priority": 1, "action": "xxx"}
+                # evidence: {"event_type": "OOM_KILL", "inference": "..."}
+                elif "event_type" in item:
+                    out.append(f"[{item.get('event_type', '?')}] {item.get('inference', '')}")
+                # alternative_hypotheses: {"hypothesis": "...", "why_rejected": "..."}
+                elif "hypothesis" in item:
+                    h = item.get('hypothesis', '')
+                    w = item.get('why_rejected', '')
+                    out.append(f"假设: {h} | 排除原因: {w}")
+                # recommendations: {"priority": "P0", "action": "xxx"} or {"priority": 0, "action": "xxx"}
                 elif "action" in item:
-                    out.append(f"[P{item.get('priority', '?')}] {item['action']}")
+                    p = str(item.get('priority', '?'))
+                    if p.startswith("P") or p.startswith("p"):
+                        out.append(f"[{p.upper()}] {item['action']}")
+                    else:
+                        out.append(f"[P{p}] {item['action']}")
                 else:
                     out.append(str(item))
             else:

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SOSReport RCA Engine</title>
+<title>SOSReport RCA Engine V0.2</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -74,6 +74,24 @@ body {
 /* Report */
 .report { display: none; }
 .report.show { display: block; }
+
+/* Score Board */
+.score-board {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+  margin-bottom: 24px;
+}
+@media (max-width: 640px) { .score-board { grid-template-columns: repeat(2, 1fr); } }
+.score-card {
+  background: #1e293b; border-radius: 10px; padding: 16px; text-align: center;
+  border: 1px solid #334155;
+}
+.score-card .score-value { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+.score-card .score-label { font-size: 12px; color: #94a3b8; }
+.score-card.score-good .score-value { color: #22c55e; }
+.score-card.score-warn .score-value { color: #f59e0b; }
+.score-card.score-bad .score-value { color: #ef4444; }
+.score-card.score-info .score-value { color: #3b82f6; }
+
 .report .meta { color: #94a3b8; font-size: 13px; margin-bottom: 24px; }
 .report .meta span { margin-right: 16px; }
 .report h2 { font-size: 20px; color: #f1f5f9; margin: 24px 0 12px; padding-bottom: 8px; border-bottom: 1px solid #334155; }
@@ -83,7 +101,7 @@ body {
   padding: 20px; border-radius: 10px; font-size: 15px; font-weight: 600;
   border: 1px solid #991b1b;
 }
-.report .severity-bar { display: flex; gap: 12px; margin: 12px 0; }
+.report .severity-bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .report .sev-tag { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
 .sev-CRITICAL { background: #7f1d1d; color: #fca5a5; }
 .sev-HIGH { background: #78350f; color: #fbbf24; }
@@ -91,12 +109,30 @@ body {
 .sev-LOW { background: #1e293b; color: #94a3b8; }
 .report .card {
   background: #1e293b; border-radius: 8px; padding: 14px 18px; margin: 6px 0;
-  font-size: 14px;
+  font-size: 14px; line-height: 1.6;
 }
 .report .card.time-item { border-left: 3px solid #3b82f6; }
 .report .card.evidence-item { border-left: 3px solid #22c55e; }
 .report .card.hypothesis-item { border-left: 3px solid #f59e0b; }
 .report .card.rec-item { border-left: 3px solid #8b5cf6; }
+.report .card .evidence-type {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; margin-right: 8px;
+  background: #14532d; color: #86efac;
+}
+.report .card .hypothesis-tag {
+  display: block; font-weight: 600; color: #fbbf24; margin-bottom: 4px;
+}
+.report .card .reject-reason {
+  display: block; font-size: 13px; color: #94a3b8;
+}
+.report .card .rec-priority {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 700; margin-right: 8px;
+}
+.rec-P0 { background: #7f1d1d; color: #fca5a5; }
+.rec-P1 { background: #78350f; color: #fbbf24; }
+.rec-P2 { background: #1e3a5f; color: #93c5fd; }
 .empty-state { color: #64748b; font-style: italic; padding: 8px 0; }
 .file-name {
   display: inline-block; padding: 6px 14px; background: #1e3a5f; color: #93c5fd;
@@ -113,7 +149,7 @@ body {
 </div>
 <div class="header">
   <h1>SOSReport RCA Engine</h1>
-  <span class="badge">V0.1</span>
+  <span class="badge">V0.2</span>
 </div>
 
 <div class="container">
@@ -159,7 +195,12 @@ body {
 
   <!-- Report -->
   <div class="report" id="report">
+    <!-- Meta Info -->
     <div class="meta" id="reportMeta"></div>
+
+    <!-- Score Board -->
+    <div class="score-board" id="scoreBoard"></div>
+
     <h2>根因分析</h2>
     <div class="root-cause" id="rootCause"></div>
 
@@ -291,8 +332,47 @@ function showError(msg) {
 }
 
 function renderReport(r, totalTime) {
+  // --- Score Board ---
+  const quality = r.data_quality || 'LOW';
+  const qualityScore = {HIGH: 100, MEDIUM: 60, LOW: 30}[quality] || 0;
+  const eventCount = r.abnormal_events || 0;
+  const hasRCA = r.root_cause && r.root_cause.length > 10;
+  const hasRecommendations = r.recommendations && r.recommendations.length > 0;
+
+  // Coverage score: based on how many sections have content
+  let coverageScore = 0;
+  if (r.summary && r.summary.length > 10) coverageScore += 20;
+  if (r.timeline && r.timeline.length > 0) coverageScore += 20;
+  if (r.evidence_list && r.evidence_list.length > 0) coverageScore += 20;
+  if (r.impact && r.impact.length > 5) coverageScore += 15;
+  if (r.hypotheses && r.hypotheses.length > 0) coverageScore += 15;
+  if (hasRecommendations) coverageScore += 10;
+
+  const overallScore = Math.round(qualityScore * 0.3 + Math.min(100, eventCount * 5) * 0.3 + coverageScore * 0.4);
+
+  const scoreClass = overallScore >= 70 ? 'score-good' : overallScore >= 40 ? 'score-warn' : 'score-bad';
+
+  document.getElementById('scoreBoard').innerHTML =
+    `<div class="score-card ${scoreClass}">
+      <div class="score-value">${overallScore}</div>
+      <div class="score-label">综合评分</div>
+    </div>
+    <div class="score-card ${quality === 'HIGH' ? 'score-good' : quality === 'MEDIUM' ? 'score-warn' : 'score-bad'}">
+      <div class="score-value">${qualityScore}</div>
+      <div class="score-label">数据质量 (${quality})</div>
+    </div>
+    <div class="score-card score-info">
+      <div class="score-value">${eventCount}</div>
+      <div class="score-label">异常事件数</div>
+    </div>
+    <div class="score-card ${coverageScore >= 60 ? 'score-good' : 'score-warn'}">
+      <div class="score-value">${coverageScore}</div>
+      <div class="score-label">分析覆盖度</div>
+    </div>`;
+
+  // --- Meta ---
   document.getElementById('reportMeta').innerHTML =
-    `<span>故障时间: ${esc(r.fault_time)}</span><span>数据质量: ${esc(r.data_quality)}</span><span>异常事件: ${r.abnormal_events}</span><span>总耗时: ${totalTime}s</span>`;
+    `<span>故障时间: ${esc(r.fault_time)}</span><span>数据质量: ${esc(quality)}</span><span>总耗时: ${totalTime}s</span>`;
 
   // Severity breakdown
   if (r.severity_breakdown && Object.keys(r.severity_breakdown).length) {
@@ -303,33 +383,64 @@ function renderReport(r, totalTime) {
     document.getElementById('reportMeta').innerHTML += '<div class="severity-bar">' + tags + '</div>';
   }
 
-  document.getElementById('rootCause').textContent = r.root_cause || '(未推断出根因)';
-  document.getElementById('summary').textContent = r.summary || '(无)';
-  document.getElementById('impact').textContent = r.impact || '(未评估)';
+  // --- Root Cause ---
+  document.getElementById('rootCause').textContent = r.root_cause || '(未推断出根因 — 请检查 LLM 配置)';
 
-  // Timeline
+  // --- Summary ---
+  document.getElementById('summary').textContent = r.summary || '(LLM 未返回故障总结)';
+
+  // --- Impact ---
+  document.getElementById('impact').textContent = r.impact || '(LLM 未评估影响范围)';
+
+  // --- Timeline ---
   const tl = document.getElementById('timelineList');
   if (r.timeline && r.timeline.length) {
     tl.innerHTML = r.timeline.map(t => `<div class="card time-item">${esc(t)}</div>`).join('');
-  } else { tl.innerHTML = '<div class="empty-state">无时间线数据</div>'; }
+  } else { tl.innerHTML = '<div class="empty-state">LLM 未返回时间线数据</div>'; }
 
-  // Evidence
+  // --- Evidence ---
   const ev = document.getElementById('evidenceList');
   if (r.evidence_list && r.evidence_list.length) {
-    ev.innerHTML = r.evidence_list.map(e => `<div class="card evidence-item">${esc(e)}</div>`).join('');
-  } else { ev.innerHTML = '<div class="empty-state">无详细证据</div>'; }
+    ev.innerHTML = r.evidence_list.map(e => {
+      // Parse evidence format: "[EVENT_TYPE] inference text"
+      const m = e.match(/^\[([^\]]+)\]\s*(.+)/);
+      if (m) {
+        return `<div class="card evidence-item"><span class="evidence-type">${esc(m[1])}</span>${esc(m[2])}</div>`;
+      }
+      return `<div class="card evidence-item">${esc(e)}</div>`;
+    }).join('');
+  } else { ev.innerHTML = '<div class="empty-state">LLM 未返回关键证据</div>'; }
 
-  // Hypotheses
+  // --- Hypotheses ---
   const hy = document.getElementById('hypothesisList');
   if (r.hypotheses && r.hypotheses.length) {
-    hy.innerHTML = r.hypotheses.map(h => `<div class="card hypothesis-item">${esc(h)}</div>`).join('');
-  } else { hy.innerHTML = '<div class="empty-state">未列出竞争性假设</div>'; }
+    hy.innerHTML = r.hypotheses.map(h => {
+      // Parse hypothesis format: "假设: ... | 排除原因: ..."
+      const m = h.match(/^假设:\s*(.+?)\s*\|\s*排除原因:\s*(.+)/);
+      if (m) {
+        return `<div class="card hypothesis-item">
+          <span class="hypothesis-tag">${esc(m[1])}</span>
+          <span class="reject-reason">排除原因: ${esc(m[2])}</span>
+        </div>`;
+      }
+      return `<div class="card hypothesis-item">${esc(h)}</div>`;
+    }).join('');
+  } else { hy.innerHTML = '<div class="empty-state">LLM 未列出竞争性假设</div>'; }
 
-  // Recommendations
+  // --- Recommendations ---
   const rec = document.getElementById('recommendationList');
   if (r.recommendations && r.recommendations.length) {
-    rec.innerHTML = r.recommendations.map((r2, i) => `<div class="card rec-item"><strong>${i+1}.</strong> ${esc(r2)}</div>`).join('');
-  } else { rec.innerHTML = '<div class="empty-state">无修复建议</div>'; }
+    rec.innerHTML = r.recommendations.map(r2 => {
+      // Parse recommendation format: "[P0] action text" or "[PP0] action text"
+      const m = r2.match(/^\[P*(P\d)\]\s*(.+)/);
+      if (m) {
+        return `<div class="card rec-item">
+          <span class="rec-priority rec-${m[1]}">${m[1]}</span>${esc(m[2])}
+        </div>`;
+      }
+      return `<div class="card rec-item">${esc(r2)}</div>`;
+    }).join('');
+  } else { rec.innerHTML = '<div class="empty-state">LLM 未返回修复建议</div>'; }
 
   document.getElementById('report').classList.add('show');
 }
@@ -342,11 +453,11 @@ function esc(s) {
 // Auto-check if server is running
 (async function() {
   try {
-    const resp = await fetch('http://localhost:8080/api/analyze', { method: 'HEAD' });
+    const resp = await fetch('/api/analyze', { method: 'HEAD' });
   } catch(e) {
     document.getElementById('serverCheck').style.display = 'block';
     document.getElementById('analyzeBtn').disabled = true;
-    document.getElementById('analyzeBtn').textContent = '服务未启动，请先运行 启动分析工具.bat';
+    document.getElementById('analyzeBtn').textContent = '服务连接失败，请刷新页面重试';
   }
 })();
 </script>

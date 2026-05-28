@@ -9,6 +9,62 @@ from src.rules.keyword_rules import match_keyword_rules
 from src.rules.threshold_rules import run_threshold_rules
 
 
+class EventAggregator:
+    """将相同 event_type 的事件聚合为带统计信息的聚合事件。
+
+    同一事件类型在同一数据源中出现成千上万次时（如 BLOCKED_TASK），
+    聚合为一个带 count 的事件，避免 LLM 上下文被重复事件淹没。
+    """
+
+    def aggregate(self, events: list[RuleEvent]) -> list[RuleEvent]:
+        groups: dict[tuple[str, str], list[RuleEvent]] = {}
+
+        for e in events:
+            key = (e.event_type, e.source_file or "")
+            if key not in groups:
+                groups[key] = []
+            groups[key].append(e)
+
+        severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+        aggregated: list[RuleEvent] = []
+
+        for (event_type, source), group in groups.items():
+            if len(group) == 1:
+                aggregated.append(group[0])
+                continue
+
+            group.sort(key=lambda e: severity_order.get(e.severity, 3))
+            max_severity = group[0].severity
+
+            timestamps = [e.timestamp for e in group if e.timestamp]
+            first_ts = min(timestamps) if timestamps else None
+            last_ts = max(timestamps) if timestamps else None
+
+            sample_lines = []
+            for e in group[:3]:
+                if isinstance(e.evidence, dict) and "raw_line" in e.evidence:
+                    sample_lines.append(e.evidence["raw_line"][:200])
+
+            evidence = {
+                "event_type": event_type,
+                "count": len(group),
+                "first_seen": first_ts,
+                "last_seen": last_ts,
+                "source": source,
+                "sample_lines": sample_lines,
+            }
+
+            aggregated.append(RuleEvent(
+                event_type=event_type,
+                timestamp=first_ts,
+                severity=max_severity,
+                source_file=source,
+                evidence=evidence,
+            ))
+
+        return aggregated
+
+
 def _connect_readonly(workspace: str) -> sqlite3.Connection:
     db_path = str(Path(workspace) / "timeline.db")
     return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -101,7 +157,11 @@ def run_rule_engine(workspace: str, fault_description: str,
     severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
     rule_events.sort(key=lambda e: severity_order.get(e.severity, 3))
 
-    # 5. Assess data quality
+    # 5. Aggregate duplicate events before passing to LLM
+    aggregator = EventAggregator()
+    rule_events = aggregator.aggregate(rule_events)
+
+    # 6. Assess data quality
     quality = _assess_quality(workspace, start_ts, end_ts)
 
     return StructuredEvidence(

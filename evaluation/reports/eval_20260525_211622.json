@@ -1,0 +1,113 @@
+{
+  "timestamp": "2026-05-25T21:16:22.917409",
+  "total_cases": 4,
+  "average_score": 0.87,
+  "pass_count": 4,
+  "fail_count": 0,
+  "results": [
+    {
+      "case": "cpu_softlockup",
+      "score": 0.87,
+      "event_recall": 1.0,
+      "keyword_recall": 0.67,
+      "forbidden_event_violations": [],
+      "forbidden_keyword_violations": [],
+      "root_cause": "底层存储设备（sda）发生硬件 I/O 错误，导致文件系统（sda1）日志损坏并强制重挂载为只读，进而引发内核线程阻塞、RCU 软死锁、OOM 及网络连接跟踪表溢出等一系列连锁故障。",
+      "summary": "19:23:25 起，存储设备 sda 出现 I/O 错误（IO_ERROR、STORAGE_ERROR），导致文件系统 sda1 日志异常（FILESYSTEM_ERROR），内核于 19:23:31 将文件系统重挂载为只读（FS_REMOUNT_RO）。此后，jbd2 日志线程因无法写入而阻塞（BLOCKED_TASK 出现 8 次），进而引发 RCU 检测到 CPU 软死锁（RCU_STALL、SOFT_LOCKUP）。内存压力下 OOM Killer 于 19:23:37 杀死 mysqld 进程（OOM_KILL、PROCESS_KILLED），随后 MySQL 端口 3306 出现",
+      "detected_events": [
+        "BLOCKED_TASK",
+        "CONNTRACK_FULL",
+        "FILESYSTEM_ERROR",
+        "FS_REMOUNT_RO",
+        "IO_ERROR",
+        "OOM_KILL",
+        "PROCESS_KILLED",
+        "RCU_STALL",
+        "SOFT_LOCKUP",
+        "STORAGE_ERROR",
+        "SYN_FLOOD"
+      ],
+      "missing_events": [],
+      "extra_checks": {},
+      "event_count_before_agg": 11
+    },
+    {
+      "case": "filesystem_corruption",
+      "score": 0.9,
+      "event_recall": 1.0,
+      "keyword_recall": 0.75,
+      "forbidden_event_violations": [],
+      "forbidden_keyword_violations": [],
+      "root_cause": "底层存储设备（sda）发生硬件 I/O 错误，导致 EXT4 文件系统日志损坏，文件系统被重新挂载为只读，进而引发系统级连锁故障（任务阻塞、RCU 停滞、软死锁、OOM 杀进程）。",
+      "summary": "19:23:25 起，系统检测到 sda1 设备 I/O 错误（IO_ERROR、STORAGE_ERROR），随后 EXT4 日志被中止（FILESYSTEM_ERROR），文件系统于 19:23:31 被重新挂载为只读（FS_REMOUNT_RO）。I/O 阻塞导致 jbd2 任务卡死超过 120 秒（BLOCKED_TASK），进而引发 RCU 停滞（RCU_STALL）和 CPU 软死锁（SOFT_LOCKUP）。内存压力累积后触发 OOM Killer 杀死 mysqld 进程（OOM_KILL、PROCESS_KILLED）。同时，MySQL 端口 3306 出现 SYN 泛洪（S",
+      "detected_events": [
+        "BLOCKED_TASK",
+        "CONNTRACK_FULL",
+        "FILESYSTEM_ERROR",
+        "FS_REMOUNT_RO",
+        "IO_ERROR",
+        "OOM_KILL",
+        "PROCESS_KILLED",
+        "RCU_STALL",
+        "SOFT_LOCKUP",
+        "STORAGE_ERROR",
+        "SYN_FLOOD"
+      ],
+      "missing_events": [],
+      "extra_checks": {},
+      "event_count_before_agg": 11
+    },
+    {
+      "case": "io_hang_oom",
+      "score": 0.9,
+      "event_recall": 1.0,
+      "keyword_recall": 0.75,
+      "forbidden_event_violations": [],
+      "forbidden_keyword_violations": [],
+      "root_cause": "底层存储设备（sda）发生 I/O 错误，导致文件系统（sda1）日志损坏并强制重新挂载为只读，进而引发 D 状态进程阻塞、RCU 和软锁存器超时，最终因内存耗尽触发 OOM Killer 杀死 mysqld 进程。",
+      "summary": "在 19:23:25 至 19:23:40 期间，存储设备 sda 出现未处理的 I/O 错误（STORAGE_ERROR），导致文件系统 sda1 的日志中止（FILESYSTEM_ERROR），系统被迫重新挂载为只读（FS_REMOUNT_RO）。这造成 jbd2 等进程长时间阻塞（BLOCKED_TASK），进而引发 RCU 和 CPU 软锁存器（RCU_STALL、SOFT_LOCKUP）。由于进程阻塞导致内存无法释放，系统在 19:23:37 触发 OOM Killer 杀死 mysqld 进程。随后，MySQL 服务中断导致端口 3306 出现 SYN 洪泛和连接跟踪表满（SYN_",
+      "detected_events": [
+        "BLOCKED_TASK",
+        "CONNTRACK_FULL",
+        "FILESYSTEM_ERROR",
+        "FS_REMOUNT_RO",
+        "IO_ERROR",
+        "OOM_KILL",
+        "PROCESS_KILLED",
+        "RCU_STALL",
+        "SOFT_LOCKUP",
+        "STORAGE_ERROR",
+        "SYN_FLOOD"
+      ],
+      "missing_events": [],
+      "extra_checks": {},
+      "event_count_before_agg": 11
+    },
+    {
+      "case": "memory_exhaustion",
+      "score": 0.8,
+      "event_recall": 1.0,
+      "keyword_recall": 0.5,
+      "forbidden_event_violations": [],
+      "forbidden_keyword_violations": [],
+      "root_cause": "底层存储设备（sda）发生 I/O 错误，导致文件系统（sda1）日志损坏并强制只读重挂载，进而引发内核线程阻塞、RCU 和软锁死锁，最终内存耗尽触发 OOM Killer 杀死进程。",
+      "summary": "19:23:25 起，系统检测到存储设备 sda 的 I/O 错误（IO_ERROR 和 STORAGE_ERROR），随后文件系统 sda1 日志损坏（FILESYSTEM_ERROR）并被强制只读重挂载（FS_REMOUNT_RO）。这导致 jbd2 等内核任务长时间阻塞（BLOCKED_TASK），进而引发 RCU 检测到 CPU 停滞（RCU_STALL）和 CPU#2 软锁死（SOFT_LOCKUP）。由于 I/O 阻塞，进程无法释放内存，内存压力持续累积，最终在 19:23:37 触发 OOM Killer 杀死 mysqld 进程。同时，MySQL 端口 3306 出现 SYN ",
+      "detected_events": [
+        "BLOCKED_TASK",
+        "CONNTRACK_FULL",
+        "FILESYSTEM_ERROR",
+        "FS_REMOUNT_RO",
+        "IO_ERROR",
+        "OOM_KILL",
+        "PROCESS_KILLED",
+        "RCU_STALL",
+        "SOFT_LOCKUP",
+        "STORAGE_ERROR",
+        "SYN_FLOOD"
+      ],
+      "missing_events": [],
+      "extra_checks": {},
+      "event_count_before_agg": 11
+    }
+  ]
+}

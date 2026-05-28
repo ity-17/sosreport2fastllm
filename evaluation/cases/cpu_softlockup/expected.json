@@ -1,0 +1,15 @@
+{
+  "scenario": "cpu_softlockup",
+  "fault_time": "19:20",
+  "fault_description": "CPU 软死锁导致内核线程长时间占用 CPU",
+
+  "must_have_events": ["RCU_STALL", "SOFT_LOCKUP", "BLOCKED_TASK"],
+  "may_have_events": ["HUNG_TASK", "OOM_KILL", "IO_ERROR", "FILESYSTEM_ERROR"],
+  "forbidden_events": [],
+
+  "must_have_keywords": ["CPU", "soft lockup", "stall"],
+  "forbidden_keywords": [],
+
+  "root_cause_should_contain": "CPU",
+  "root_cause_should_not_contain": ""
+}

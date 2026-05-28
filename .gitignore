@@ -1,3 +1,6 @@
+# Environment config (contains API keys)
+.env
+
 # Python
 __pycache__/
 *.py[cod]
@@ -5,6 +8,7 @@ __pycache__/
 
 # Test data (large binaries)
 test_scenarios/
+evaluation/cases/*/sosreport.tar.xz
 
 # Real production data
 sosreport-GM-BPL1133999-20260513183947/
@@ -14,6 +18,12 @@ sample_data/
 
 # Generated reports
 report.md
+
+# Deploy artifacts
+deploy.tar.gz
+
+# Misc
+chatgpt.md
 
 # Workspace / temp
 workspace/

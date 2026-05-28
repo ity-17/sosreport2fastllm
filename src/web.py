@@ -13,30 +13,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from flask import Flask, request, jsonify
+from src.config import DEEPSEEK_API_KEY, DEEPSEEK_API_URL, LLM_MODEL
 from src.extractor import extract_and_index
 from src.timeline import build_timeline
 from src.rules import run_rule_engine
 from src.rca import run_rca
 
 app = Flask(__name__)
-
-# config
-DEEPSEEK_API_KEY = ""
-DEEPSEEK_API_URL = ""
-
-
-def _load_config():
-    global DEEPSEEK_API_KEY, DEEPSEEK_API_URL
-    cfg_path = Path(__file__).parent / "main.py"
-    if cfg_path.exists():
-        with open(cfg_path, encoding="utf-8") as f:
-            content = f.read()
-        m = re.search(r'DEEPSEEK_API_KEY\s*=\s*"([^"]*)"', content)
-        if m:
-            DEEPSEEK_API_KEY = m.group(1)
-        m = re.search(r'DEEPSEEK_API_URL\s*=\s*"([^"]*)"', content)
-        if m:
-            DEEPSEEK_API_URL = m.group(1)
 
 
 @app.after_request
@@ -58,7 +41,7 @@ def analyze():
     fault_desc = request.form.get("fault_desc", "")
     fault_time = request.form.get("fault_time", "")
     margin = int(request.form.get("margin", 15))
-    model = request.form.get("model", "deepseek-chat")
+    model = request.form.get("model", LLM_MODEL)
 
     # 保存上传文件
     job_id = uuid.uuid4().hex[:8]
@@ -145,349 +128,11 @@ def _count_severity(evidence) -> dict:
     return counts
 
 
-# ============================================================
-# HTML 页面
-# ============================================================
 
-HTML_PAGE = r"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SOSReport RCA Engine</title>
-<style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  background: #0f172a; color: #e2e8f0; min-height: 100vh;
-}
-.header {
-  background: #1e293b; border-bottom: 1px solid #334155; padding: 16px 24px;
-  display: flex; align-items: center; gap: 12px;
-}
-.header h1 { font-size: 18px; font-weight: 600; color: #f1f5f9; }
-.header .badge { background: #3b82f6; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 10px; }
-.container { max-width: 1000px; margin: 0 auto; padding: 24px; }
+# HTML 页面从 index.html 加载，避免重复维护
+_INDEX_PATH = Path(__file__).parent.parent / "index.html"
+HTML_PAGE = _INDEX_PATH.read_text(encoding="utf-8") if _INDEX_PATH.exists() else "<html><body><h1>index.html not found</h1></body></html>"
 
-/* Drop Zone */
-.drop-zone {
-  border: 2px dashed #475569; border-radius: 12px; padding: 48px 24px;
-  text-align: center; cursor: pointer; transition: all .2s;
-  background: #1e293b; margin-bottom: 20px;
-}
-.drop-zone:hover, .drop-zone.drag-over { border-color: #3b82f6; background: #1e3a5f; }
-.drop-zone .icon { font-size: 48px; margin-bottom: 12px; }
-.drop-zone .title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
-.drop-zone .subtitle { font-size: 13px; color: #94a3b8; }
-.drop-zone input { display: none; }
-
-/* Form */
-.params {
-  display: grid; grid-template-columns: 1fr 1fr 120px; gap: 12px;
-  margin-bottom: 20px;
-}
-@media (max-width: 640px) { .params { grid-template-columns: 1fr; } }
-.params label { font-size: 13px; color: #94a3b8; margin-bottom: 4px; display: block; }
-.params input, .params select {
-  width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #475569;
-  background: #1e293b; color: #e2e8f0; font-size: 14px;
-}
-.params input:focus { outline: none; border-color: #3b82f6; }
-
-.btn {
-  display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px;
-  background: #3b82f6; color: #fff; border: none; border-radius: 8px;
-  font-size: 14px; font-weight: 600; cursor: pointer; transition: all .2s;
-}
-.btn:hover { background: #2563eb; }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
-.btn-area { text-align: center; margin-bottom: 20px; }
-
-/* Progress */
-.progress { display: none; margin-bottom: 24px; }
-.progress.show { display: block; }
-.step-list { display: flex; flex-direction: column; gap: 8px; }
-.step-item {
-  display: flex; align-items: center; gap: 12px; padding: 10px 16px;
-  background: #1e293b; border-radius: 8px; border-left: 3px solid #334155;
-}
-.step-item.completed { border-left-color: #22c55e; }
-.step-item.active { border-left-color: #3b82f6; }
-.step-item.error { border-left-color: #ef4444; }
-.step-item .step-icon { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
-.step-item.completed .step-icon { background: #22c55e; color: #fff; }
-.step-item.active .step-icon { background: #3b82f6; color: #fff; animation: pulse 1s infinite; }
-.step-item.error .step-icon { background: #ef4444; color: #fff; }
-.step-item .step-label { flex: 1; font-size: 14px; }
-.step-item .step-time { font-size: 12px; color: #64748b; }
-@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
-
-/* Report */
-.report { display: none; }
-.report.show { display: block; }
-.report .meta { color: #94a3b8; font-size: 13px; margin-bottom: 24px; }
-.report .meta span { margin-right: 16px; }
-.report h2 { font-size: 20px; color: #f1f5f9; margin: 24px 0 12px; padding-bottom: 8px; border-bottom: 1px solid #334155; }
-.report h3 { font-size: 16px; color: #e2e8f0; margin: 16px 0 8px; }
-.report .root-cause {
-  background: linear-gradient(135deg, #7c1d1d, #5c1010); color: #fca5a5;
-  padding: 20px; border-radius: 10px; font-size: 15px; font-weight: 600;
-  border: 1px solid #991b1b;
-}
-.report .severity-bar { display: flex; gap: 12px; margin: 12px 0; }
-.report .sev-tag { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
-.sev-CRITICAL { background: #7f1d1d; color: #fca5a5; }
-.sev-HIGH { background: #78350f; color: #fbbf24; }
-.sev-MEDIUM { background: #1e3a5f; color: #93c5fd; }
-.sev-LOW { background: #1e293b; color: #94a3b8; }
-.report .card {
-  background: #1e293b; border-radius: 8px; padding: 14px 18px; margin: 6px 0;
-  font-size: 14px;
-}
-.report .card.time-item { border-left: 3px solid #3b82f6; }
-.report .card.evidence-item { border-left: 3px solid #22c55e; }
-.report .card.hypothesis-item { border-left: 3px solid #f59e0b; }
-.report .card.rec-item { border-left: 3px solid #8b5cf6; }
-.empty-state { color: #64748b; font-style: italic; padding: 8px 0; }
-.file-name {
-  display: inline-block; padding: 6px 14px; background: #1e3a5f; color: #93c5fd;
-  border-radius: 6px; font-size: 13px; margin-top: 8px;
-}
-.error-box { background: #450a0a; color: #fca5a5; padding: 16px; border-radius: 8px; margin: 12px 0; font-size: 14px; }
-</style>
-</head>
-<body>
-
-<div class="header">
-  <h1>SOSReport RCA Engine</h1>
-  <span class="badge">V0.1</span>
-</div>
-
-<div class="container">
-  <!-- Drop Zone -->
-  <div class="drop-zone" id="dropZone">
-    <div class="icon">&#128736;</div>
-    <div class="title">拖拽 sosreport 文件到这里</div>
-    <div class="subtitle">支持 .tar.xz / .tar.gz / 目录</div>
-    <input type="file" id="fileInput" accept=".tar.xz,.tar.gz,.tgz,.tar,.zip">
-    <div class="file-name" id="fileName" style="display:none"></div>
-  </div>
-
-  <!-- Parameters -->
-  <div class="params">
-    <div>
-      <label>故障描述</label>
-      <input type="text" id="faultDesc" placeholder="如：15:32 系统卡死" required>
-    </div>
-    <div>
-      <label>故障时间</label>
-      <input type="text" id="faultTime" placeholder="如：16:14 或 15:32">
-    </div>
-    <div>
-      <label>时间窗口(分钟)</label>
-      <input type="number" id="margin" value="15" min="1" max="120">
-    </div>
-  </div>
-
-  <!-- Button -->
-  <div class="btn-area">
-    <button class="btn" id="analyzeBtn" onclick="startAnalysis()">
-      开始分析
-    </button>
-  </div>
-
-  <!-- Progress -->
-  <div class="progress" id="progress">
-    <div class="step-list" id="stepList"></div>
-  </div>
-
-  <!-- Error -->
-  <div class="error-box" id="errorBox" style="display:none"></div>
-
-  <!-- Report -->
-  <div class="report" id="report">
-    <div class="meta" id="reportMeta"></div>
-    <h2>根因分析</h2>
-    <div class="root-cause" id="rootCause"></div>
-
-    <h2>故障总结</h2>
-    <div class="card" id="summary"></div>
-
-    <h2>影响范围</h2>
-    <div class="card" id="impact"></div>
-
-    <h2>关键时间线</h2>
-    <div id="timelineList"></div>
-
-    <h2>关键证据</h2>
-    <div id="evidenceList"></div>
-
-    <h2>竞争性假设（已排除）</h2>
-    <div id="hypothesisList"></div>
-
-    <h2>修复建议</h2>
-    <div id="recommendationList"></div>
-  </div>
-</div>
-
-<script>
-let selectedFile = null;
-
-const dz = document.getElementById('dropZone');
-const fi = document.getElementById('fileInput');
-
-dz.addEventListener('click', () => fi.click());
-dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
-dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
-dz.addEventListener('drop', e => {
-  e.preventDefault();
-  dz.classList.remove('drag-over');
-  if (e.dataTransfer.files.length) {
-    selectedFile = e.dataTransfer.files[0];
-    showFileName();
-  }
-});
-fi.addEventListener('change', () => {
-  if (fi.files.length) { selectedFile = fi.files[0]; showFileName(); }
-});
-
-function showFileName() {
-  const el = document.getElementById('fileName');
-  el.textContent = selectedFile.name;
-  el.style.display = 'inline-block';
-}
-
-async function startAnalysis() {
-  if (!selectedFile) { alert('请先拖拽上传 sosreport 文件'); return; }
-
-  const formData = new FormData();
-  formData.append('file', selectedFile);
-  formData.append('fault_desc', document.getElementById('faultDesc').value);
-  formData.append('fault_time', document.getElementById('faultTime').value);
-  formData.append('margin', document.getElementById('margin').value);
-
-  // Reset UI
-  document.getElementById('report').classList.remove('show');
-  document.getElementById('errorBox').style.display = 'none';
-  document.getElementById('analyzeBtn').disabled = true;
-  const progress = document.getElementById('progress');
-  progress.classList.add('show');
-
-  const stepNames = ['解压+索引', '时间线构建', '规则引擎', 'LLM 根因分析', '报告生成'];
-  const stepList = document.getElementById('stepList');
-  stepList.innerHTML = stepNames.map((s, i) =>
-    `<div class="step-item" id="step${i}"><div class="step-icon">${i+1}</div><div class="step-label">${s}</div><div class="step-time"></div></div>`
-  ).join('');
-
-  // Animate steps
-  let currentStep = 0;
-  const animInterval = setInterval(() => {
-    const el = document.getElementById('step' + currentStep);
-    if (el) {
-      if (currentStep > 0) {
-        const prev = document.getElementById('step' + (currentStep - 1));
-        if (prev) { prev.className = 'step-item completed'; prev.querySelector('.step-icon').textContent = '✓'; }
-      }
-      el.className = 'step-item active';
-    }
-    currentStep++;
-    if (currentStep >= 5) clearInterval(animInterval);
-  }, 15000);
-
-  try {
-    const resp = await fetch('/api/analyze', { method: 'POST', body: formData });
-    clearInterval(animInterval);
-    const data = await resp.json();
-
-    // Show completed steps
-    stepNames.forEach((_, i) => {
-      const el = document.getElementById('step' + i);
-      if (el) {
-        el.className = 'step-item completed';
-        el.querySelector('.step-icon').textContent = '✓';
-      }
-    });
-
-    if (data.error) {
-      showError(data.error);
-      return;
-    }
-
-    // Update step times from actual data
-    if (data.steps) {
-      data.steps.forEach((s, i) => {
-        const el = document.getElementById('step' + i);
-        if (el) el.querySelector('.step-time').textContent = s.time + 's';
-      });
-    }
-
-    renderReport(data.report, data.total_time);
-
-  } catch (err) {
-    clearInterval(animInterval);
-    showError('网络请求失败: ' + err.message);
-  } finally {
-    document.getElementById('analyzeBtn').disabled = false;
-  }
-}
-
-function showError(msg) {
-  const el = document.getElementById('errorBox');
-  el.textContent = '错误: ' + msg;
-  el.style.display = 'block';
-}
-
-function renderReport(r, totalTime) {
-  document.getElementById('reportMeta').innerHTML =
-    `<span>故障时间: ${esc(r.fault_time)}</span><span>数据质量: ${esc(r.data_quality)}</span><span>异常事件: ${r.abnormal_events}</span><span>总耗时: ${totalTime}s</span>`;
-
-  // Severity breakdown
-  if (r.severity_breakdown && Object.keys(r.severity_breakdown).length) {
-    let tags = '';
-    for (const [sev, count] of Object.entries(r.severity_breakdown)) {
-      tags += `<span class="sev-tag sev-${sev}">${sev}: ${count}</span>`;
-    }
-    document.getElementById('reportMeta').innerHTML += '<div class="severity-bar">' + tags + '</div>';
-  }
-
-  document.getElementById('rootCause').textContent = r.root_cause || '(未推断出根因)';
-  document.getElementById('summary').textContent = r.summary || '(无)';
-  document.getElementById('impact').textContent = r.impact || '(未评估)';
-
-  // Timeline
-  const tl = document.getElementById('timelineList');
-  if (r.timeline && r.timeline.length) {
-    tl.innerHTML = r.timeline.map(t => `<div class="card time-item">${esc(t)}</div>`).join('');
-  } else { tl.innerHTML = '<div class="empty-state">无时间线数据</div>'; }
-
-  // Evidence
-  const ev = document.getElementById('evidenceList');
-  if (r.evidence_list && r.evidence_list.length) {
-    ev.innerHTML = r.evidence_list.map(e => `<div class="card evidence-item">${esc(e)}</div>`).join('');
-  } else { ev.innerHTML = '<div class="empty-state">无详细证据</div>'; }
-
-  // Hypotheses
-  const hy = document.getElementById('hypothesisList');
-  if (r.hypotheses && r.hypotheses.length) {
-    hy.innerHTML = r.hypotheses.map(h => `<div class="card hypothesis-item">${esc(h)}</div>`).join('');
-  } else { hy.innerHTML = '<div class="empty-state">未列出竞争性假设</div>'; }
-
-  // Recommendations
-  const rec = document.getElementById('recommendationList');
-  if (r.recommendations && r.recommendations.length) {
-    rec.innerHTML = r.recommendations.map((r2, i) => `<div class="card rec-item"><strong>${i+1}.</strong> ${esc(r2)}</div>`).join('');
-  } else { rec.innerHTML = '<div class="empty-state">无修复建议</div>'; }
-
-  document.getElementById('report').classList.add('show');
-}
-
-function esc(s) {
-  if (!s) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-</script>
-</body>
-</html>"""
 
 
 @app.route("/")
@@ -496,7 +141,6 @@ def index():
 
 
 if __name__ == "__main__":
-    _load_config()
     url = "http://localhost:8080"
     print(f"SOSReport RCA Web 服务启动中...")
     print(f"API Key: {'已配置' if DEEPSEEK_API_KEY else '未配置 — LLM 将不可用'}")
